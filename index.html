@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-<title>Dose Quest Pediatrica · Prima pagina sempre attiva</title>
+<title>Dose Quest Pediatrica · GitHub automatico</title>
 <style>
 :root{
   --ink:#25304f; --muted:#69728e; --line:rgba(37,48,79,.13);
@@ -209,7 +209,7 @@ mini{display:block}
     <label class="field full"><span>🔗 URL Web App Google Script /exec · già impostato</span><input id="sheetUrl" placeholder="https://script.google.com/macros/s/.../exec"></label>
     <label class="field full"><span>URL pubblico del quiz per QR</span><input id="qrUrl" placeholder="incolla il link pubblicato su GitHub Pages / Netlify"></label>
     <div class="full" style="display:flex;gap:1vw;align-items:center"><img class="qrImg" id="qrImg" alt="QR"><div style="font-weight:850;color:#59627e;line-height:1.35">Il QR deve puntare al quiz pubblicato online, non al file locale. Nel campo Google devi incollare l’URL della Web App che termina con /exec, non il link del foglio.</div></div>
-    <div class="full" id="sheetStatus" style="font-weight:950;color:#59627e"></div>
+    <div class="full" id="sheetStatus" style="font-weight:950;color:#59627e">Invio automatico configurato: al clic su Completa i risultati vengono inviati al Google Sheet.</div>
   </div>
   <div class="modalActions"><button class="modalBtn" id="useCurrent">Usa URL attuale</button><button class="modalBtn" id="makeQr">Genera QR</button><button class="modalBtn" id="sendBtn">Invia risultati</button><button class="modalBtn" id="csvBtn">CSV</button><button class="modalBtn" id="resetBtn">Reset</button><button class="modalBtn main" id="saveSettings">Salva e chiudi</button></div>
 </div></div>
@@ -318,7 +318,81 @@ function payload(){
  const correct=answers.filter(a=>a.correct).length; const pct=Math.round(correct/QUESTIONS.length*100);
  return {quizTitle:'Dose Quest Pediatrico - landscape registrazione',submittedAtISO:new Date().toISOString(),submittedAtIT:new Date().toLocaleString('it-IT'),studentName:state.student.name||'',studentId:state.student.id||'',course:state.student.course||'',mode:'landscape one page pediatric wow con registrazione',scorePct:pct,correct,total:QUESTIONS.length,durationSeconds:Math.round((Date.now()-state.start)/1000),criticalAreas:answers.filter(a=>!a.correct).slice(0,5).map(a=>a.area).join('; '),userAgent:navigator.userAgent,answers};
 }
-async function sendToGoogle(show){saveSettings(); const url=state.sheetUrl; if(!url){$('sheetStatus').textContent='Incolla prima l’URL /exec della Web App.';return false} try{const fd=new FormData();fd.append('payload',JSON.stringify(payload()));await fetch(url,{method:'POST',body:fd,mode:'no-cors'});$('sheetStatus').textContent='Invio avviato: controlla il Google Sheet.';return true}catch(e){$('sheetStatus').textContent='Errore invio: '+e.message;return false}}
+function postToGoogleViaHiddenForm(url, data){
+  return new Promise(resolve=>{
+    try{
+      const stamp = Date.now();
+      const iframe = document.createElement('iframe');
+      iframe.name = 'dosequest_google_sink_' + stamp;
+      iframe.style.cssText = 'position:absolute;width:1px;height:1px;left:-9999px;top:-9999px;border:0;opacity:0;';
+      document.body.appendChild(iframe);
+
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = url;
+      form.target = iframe.name;
+      form.enctype = 'application/x-www-form-urlencoded';
+      form.acceptCharset = 'UTF-8';
+      form.style.display = 'none';
+
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'payload';
+      input.value = JSON.stringify(data);
+      form.appendChild(input);
+      document.body.appendChild(form);
+
+      let completed = false;
+      const cleanup = () => {
+        setTimeout(()=>{ try{form.remove(); iframe.remove();}catch(e){} }, 1200);
+      };
+      iframe.onload = () => {
+        if(completed) return;
+        completed = true;
+        cleanup();
+        resolve(true);
+      };
+      form.submit();
+      setTimeout(()=>{
+        if(completed) return;
+        completed = true;
+        cleanup();
+        resolve(true);
+      }, 3000);
+    } catch(err){
+      resolve(false);
+    }
+  });
+}
+async function sendToGoogle(show){
+  saveSettings();
+  const url = (state.sheetUrl || DEFAULT_SHEET_URL || '').trim();
+  if(!url){
+    $('sheetStatus').textContent='URL /exec mancante: controlla la configurazione docente.';
+    return false;
+  }
+  const data = payload();
+  data.sendMethod = 'hidden_form_auto';
+  data.pageUrl = location.href;
+  data.githubReady = true;
+  const ok = await postToGoogleViaHiddenForm(url, data);
+  if(ok){
+    localStorage.setItem('dosequest_last_payload', JSON.stringify(data));
+    localStorage.setItem('dosequest_last_send', new Date().toISOString());
+    $('sheetStatus').textContent='Invio automatico avviato. Controlla il Google Sheet; se non vedi la riga, verifica autorizzazioni e distribuzione Web App.';
+    return true;
+  }
+  try{
+    const fd=new FormData();
+    fd.append('payload',JSON.stringify(data));
+    await fetch(url,{method:'POST',body:fd,mode:'no-cors',cache:'no-store'});
+    $('sheetStatus').textContent='Invio automatico avviato con metodo alternativo. Controlla il Google Sheet.';
+    return true;
+  }catch(e){
+    $('sheetStatus').textContent='Errore invio: '+e.message+'. Scarica il CSV come backup e controlla la Web App.';
+    return false;
+  }
+}
 function downloadCsv(){const p=payload(); const rows=[['N','ID','Area','Scenario','Domanda','Check dose','Check ok','Risposta studente','Risposta corretta','Esito']].concat(p.answers.map(a=>[a.number,a.id,a.area,a.scenario,a.question,a.doseCheckAnswer,a.doseCheckCorrect?'OK':'',a.studentAnswer,a.expectedAnswer,a.correct?'Corretta':'Errore'])); const csv=rows.map(r=>r.map(x=>'"'+String(x??'').replace(/"/g,'""')+'"').join(';')).join('\\n'); const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='risultati_dose_quest_pediatrico.csv'; a.click(); URL.revokeObjectURL(a.href)}
 function makeQr(){const u=$('qrUrl').value.trim(); if(!u) return; $('qrImg').src='https://api.qrserver.com/v1/create-qr-code/?size=220x220&data='+encodeURIComponent(u)}
 init();
