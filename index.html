@@ -123,6 +123,21 @@ mini{display:block}
 .full{grid-column:1/-1}
 .modalActions{display:flex;justify-content:flex-end;gap:.7vw}
 .modalBtn{height:5vh;border-radius:18px;padding:0 1.2vw;font-weight:1000;background:#eafaff}.modalBtn.main{background:#ffc1de;color:#7b1643}
+
+.reportGrid{display:grid;grid-template-columns:1.05fr .95fr;gap:1.2vw;align-items:stretch}
+.reportCard{border:1px solid var(--line);border-radius:24px;background:linear-gradient(135deg,#fff7fb,#f2fbff);padding:1.5vh 1.4vw;box-shadow:0 14px 34px rgba(88,102,148,.10)}
+.reportScore{display:flex;align-items:center;gap:1vw}
+.reportEmoji{width:70px;height:70px;border-radius:24px;background:linear-gradient(135deg,#ffd7e9,#dff7ff);display:grid;place-items:center;font-size:38px;box-shadow:inset 0 0 0 2px rgba(255,255,255,.7)}
+.reportBig{font-size:clamp(34px,4.1vw,58px);font-weight:1000;line-height:.95;color:#2f3c5c}
+.reportLabel{font-weight:950;color:#6b7691;margin-top:.4vh}
+.reportMini{display:grid;grid-template-columns:1fr 1fr;gap:.8vw;margin-top:1.2vh}
+.reportMini div{border-radius:18px;background:rgba(255,255,255,.78);border:1px solid rgba(210,219,237,.9);padding:1vh 1vw;font-weight:950;color:#53617d}
+.reportMini b{display:block;font-size:clamp(18px,1.9vw,28px);color:#2f3c5c}
+.reportList{display:grid;gap:.7vh;font-weight:900;color:#52607c;line-height:1.25}
+.reportList .okLine{color:#0b8d62}.reportList .badLine{color:#bb315f}.reportList .infoLine{color:#405477}
+.reportNote{border-radius:20px;background:#fff;border:1px dashed #f2aacb;padding:1vh 1vw;font-weight:900;color:#59627e;line-height:1.25}
+@media(max-width:760px){.reportGrid{grid-template-columns:1fr}.reportEmoji{width:58px;height:58px}.reportMini{grid-template-columns:1fr 1fr}.modalActions{flex-wrap:wrap}.modalBtn{min-width:42%}}
+
 .qrImg{width:150px;height:150px;border-radius:18px;border:1px solid var(--line);background:#f8fbff;display:block}
 @supports (height:100dvh){.app{height:100dvh}}
 @media (orientation:portrait){#portrait{display:grid;position:fixed;inset:0;z-index:99;background:linear-gradient(135deg,#fff1f8,#e8fbff);place-items:center;text-align:center;padding:8vw}#portrait div{max-width:520px;background:white;border-radius:30px;padding:28px;box-shadow:var(--shadow);font-weight:1000;color:var(--ink)}.app{filter:blur(8px)}}
@@ -200,6 +215,17 @@ mini{display:block}
 </main>
 </div>
 
+
+<div class="overlay" id="resultOverlay"><div class="modal resultModal">
+  <h2>🌈 Report risultato · Dose Quest</h2>
+  <div id="resultReportBody" class="reportGrid"></div>
+  <div class="modalActions">
+    <button class="modalBtn" id="resultRetryBtn">↻ Riprova invio</button>
+    <button class="modalBtn" id="resultCsvBtn">CSV</button>
+    <button class="modalBtn main" id="resultCloseBtn">Chiudi</button>
+  </div>
+</div></div>
+
 <div class="overlay" id="settingsOverlay"><div class="modal">
   <h2>👩‍🏫 Docente / Google · invio automatico già configurato</h2>
   <div class="formGrid">
@@ -258,6 +284,7 @@ function bind(){
   $('settingsBtn').onclick=()=>open('settingsOverlay'); $('finishBtn').onclick=finish; $('saveSettings').onclick=saveSettings; $('resetBtn').onclick=()=>{if(confirm('Azzerare il quiz?')){state.answers={};state.checked={};state.doseChecks={};state.i=0;state.start=Date.now();render(); close('settingsOverlay')}};
   $('startMissionBtn').onclick=startMission; $('startTeacherBtn').onclick=()=>open('settingsOverlay'); $('startName').addEventListener('keydown',e=>{if(e.key==='Enter')startMission()}); $('startId').addEventListener('keydown',e=>{if(e.key==='Enter')startMission()}); $('startCourse').addEventListener('keydown',e=>{if(e.key==='Enter')startMission()});
   $('sendBtn').onclick=()=>sendToGoogle(true); $('csvBtn').onclick=downloadCsv; $('useCurrent').onclick=()=>{$('qrUrl').value=location.href.startsWith('file:')?'':location.href}; $('makeQr').onclick=makeQr;
+  $('resultCloseBtn').onclick=()=>close('resultOverlay'); $('resultCsvBtn').onclick=downloadCsv; $('resultRetryBtn').onclick=async()=>{ $('resultRetryBtn').textContent='Invio...'; const ok=await sendToGoogle(false); showResultReport(ok); $('resultRetryBtn').textContent='↻ Riprova invio'; };
   $('answerInput').addEventListener('keydown',e=>{if(e.key==='Enter')checkAnswer()}); $('doseInput').addEventListener('keydown',e=>{if(e.key==='Enter')checkDose()});
 }
 function open(id){$(id).classList.add('show')} function close(id){$(id).classList.remove('show')}
@@ -295,11 +322,31 @@ async function finish(){
   $('finishBtn').textContent='⏳ Invio...';
   const ok = await sendToGoogle(false);
   $('finishBtn').textContent= ok ? '✅ Inviato' : '⚠️ Controlla Google';
-  open('settingsOverlay');
-  $('sheetStatus').textContent = ok
-    ? 'Risultati inviati automaticamente al Google Sheet. Puoi chiudere oppure scaricare il CSV di sicurezza.'
-    : 'Non sono riuscita a confermare l’invio. Controlla URL /exec, autorizzazioni e distribuzione Web App; puoi riprovare con “Invia risultati”.';
+  showResultReport(ok);
 }
+function showResultReport(sendOk){
+  const p=payload();
+  const wrong=p.total-p.correct;
+  const missing=p.answers.filter(a=>!a.studentAnswer).length;
+  const wrongAreas=p.answers.filter(a=>!a.correct).slice(0,4).map(a=>'• '+a.number+'. '+a.area).join('<br>') || 'Nessuna area critica: tutte corrette 🌟';
+  const googleMsg=sendOk
+    ? '✅ Invio automatico avviato verso Google Fogli.'
+    : '⚠️ Invio non confermato: controlla Web App /exec o riprova.';
+  $('resultReportBody').innerHTML = `
+    <div class="reportCard">
+      <div class="reportScore"><div class="reportEmoji">${p.scorePct>=80?'🏆':p.scorePct>=60?'🌟':'🧸'}</div><div><div class="reportBig">${p.correct}/${p.total}</div><div class="reportLabel">risposte corrette · ${p.scorePct}%</div></div></div>
+      <div class="reportMini"><div><b>${wrong}</b> da rivedere</div><div><b>${missing}</b> non compilate</div></div>
+      <div class="reportNote" style="margin-top:1.1vh">👤 <b>${escapeHtml(p.studentName||'Studente')}</b><br>🎓 ${escapeHtml(p.course||'Corso non indicato')}<br>🕒 ${escapeHtml(p.submittedAtIT)}</div>
+    </div>
+    <div class="reportCard reportList">
+      <div class="${sendOk?'okLine':'badLine'}">${googleMsg}</div>
+      <div class="infoLine">📊 Il risultato è stato riepilogato anche nel payload inviato al foglio.</div>
+      <div><b>🔎 Aree da ripassare</b><br>${wrongAreas}</div>
+      <div class="reportNote">Il report è semplice: mostra quante risposte sono corrette, quante sono da rivedere e le prime aree critiche.</div>
+    </div>`;
+  open('resultOverlay');
+}
+function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
 function pulse(el){el.animate([{transform:'translateX(0)'},{transform:'translateX(-6px)'},{transform:'translateX(6px)'},{transform:'translateX(0)'}],{duration:220})}
 function buildCalc(){
  const keys=['C','⌫','÷','×','7','8','9','−','4','5','6','+','1','2','3','=','0',',','.','('];
